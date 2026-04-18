@@ -81,6 +81,14 @@ Edit the `Dockerfile` to add or remove packages. The wrapper detects that the Do
 ## Uninstall
 
 ```sh
+./uninstall              # remove the symlink from ~/.local/bin/claudesbx
+./uninstall /usr/local/bin/claudesbx
+./uninstall --purge      # also remove the docker image, volume, and ~/.claudesbx
+```
+
+Or manually:
+
+```sh
 rm ~/.local/bin/claudesbx
 docker volume rm claudesbx-home
 docker image rm claudesbx

@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SRC="$SCRIPT_DIR/claudesbx"
 DEST="${1:-$HOME/.local/bin/claudesbx}"
 
-[[ -x "$SRC" ]] || { echo "missing executable: $SRC" >&2; exit 1; }
+[ -x "$SRC" ] || { echo "missing executable: $SRC" >&2; exit 1; }
 
 mkdir -p "$(dirname "$DEST")"
 ln -sfn "$SRC" "$DEST"

@@ -1,72 +1,85 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-VOLUME="${CLAUDESBX_VOLUME:-claudesbx-home}"
 IMAGE="${CLAUDESBX_IMAGE:-claudesbx}"
 HOST_CLAUDE="$HOME/.claude"
 SANDBOX_DIR="$HOME/.claudesbx"
+SANDBOX_HOME_DIR="${CLAUDESBX_HOME_DIR:-$SANDBOX_DIR/home}"
 SANDBOX_JSON="$SANDBOX_DIR/.claude.json"
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
-SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+SCRIPT_PATH=$(readlink -f "$0")
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 DOCKERFILE="$SCRIPT_DIR/Dockerfile"
+ENTRYPOINT_SH="$SCRIPT_DIR/entrypoint.sh"
+
+# POSIX single-quote: wrap arg in '...' with internal ' escaped as '\''
+sq() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "' "
+}
+
+# Stash original script args as a quoted string for later eval
+orig_args=""
+for a in "$@"; do
+    orig_args="$orig_args$(sq "$a")"
+done
 
 needs_build=0
 if ! image_ts=$(docker image inspect -f '{{.Created}}' "$IMAGE" 2>/dev/null); then
     needs_build=1
-elif [[ -f "$DOCKERFILE" ]]; then
+else
     image_epoch=$(date -d "$image_ts" +%s 2>/dev/null || echo 0)
-    dockerfile_epoch=$(stat -c %Y "$DOCKERFILE")
-    (( dockerfile_epoch > image_epoch )) && needs_build=1
+    for f in "$DOCKERFILE" "$ENTRYPOINT_SH"; do
+        [ -f "$f" ] || continue
+        f_epoch=$(stat -c %Y "$f")
+        if [ "$f_epoch" -gt "$image_epoch" ]; then
+            needs_build=1
+            break
+        fi
+    done
 fi
 
-if (( needs_build )); then
+if [ "$needs_build" -eq 1 ]; then
     echo "claudesbx: building $IMAGE..." >&2
     docker build -t "$IMAGE" "$SCRIPT_DIR"
 fi
 
-docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
+mkdir -p "$SANDBOX_DIR" "$SANDBOX_HOME_DIR"
+[ -f "$SANDBOX_JSON" ] || echo '{}' > "$SANDBOX_JSON"
 
-mkdir -p "$SANDBOX_DIR"
-[[ -f "$SANDBOX_JSON" ]] || echo '{}' > "$SANDBOX_JSON"
+# Build docker args into "$@" via set --
+set -- -v "$SANDBOX_HOME_DIR:/root" -v "$SANDBOX_JSON:/root/.claude.json"
 
-shared=()
 for sub in agents skills plugins CLAUDE.md projects; do
-    if [[ -e "$HOST_CLAUDE/$sub" ]]; then
-        shared+=(-v "$HOST_CLAUDE/$sub:/root/.claude/$sub")
+    if [ -e "$HOST_CLAUDE/$sub" ]; then
+        set -- "$@" -v "$HOST_CLAUDE/$sub:/root/.claude/$sub"
     fi
 done
 
-serena=()
-if [[ -d "$HOME/.serena" ]]; then
-    serena+=(-v "$HOME/.serena:/root/.serena")
+if [ -d "$HOME/.serena" ]; then
+    set -- "$@" -v "$HOME/.serena:/root/.serena"
 fi
 
+if [ -S /var/run/docker.sock ]; then
+    set -- "$@" -v /var/run/docker.sock:/var/run/docker.sock
+fi
+
+set -- "$@" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)"
+
+# shellcheck disable=SC2016  # variables expand inside the container's bash
 bootstrap='
 sentinel=/root/.claudesbx-bootstrapped
-if [[ ! -f $sentinel ]]; then
+if [ ! -f "$sentinel" ]; then
   mcps=$(claude mcp list 2>/dev/null || true)
-  grep -q "^serena" <<<"$mcps" || \
+  echo "$mcps" | grep -q "^serena" || \
     claude mcp add --scope user serena -- uvx --from git+https://github.com/oraios/serena serena start-mcp-server --context=claude-code --project-from-cwd >/dev/null
-  grep -q "^playwright" <<<"$mcps" || \
+  echo "$mcps" | grep -q "^playwright" || \
     claude mcp add --scope user playwright -- npx @playwright/mcp@latest >/dev/null
   touch "$sentinel"
 fi
 exec claude "$@"
 '
 
-dind=()
-if [[ -S /var/run/docker.sock ]]; then
-    dind+=(-v /var/run/docker.sock:/var/run/docker.sock)
-fi
+set -- "$@" -v "$PWD:$PWD" -w "$PWD" "$IMAGE" bash -c "$bootstrap" bash
 
-docker run --rm -it \
-    -v "$VOLUME:/root" \
-    -v "$SANDBOX_JSON:/root/.claude.json" \
-    "${shared[@]}" \
-    "${serena[@]}" \
-    "${dind[@]}" \
-    -v "$PWD:$PWD" \
-    -w "$PWD" \
-    --entrypoint bash \
-    "$IMAGE" \
-    -c "$bootstrap" bash "$@"
+eval "exec docker run --rm -it \"\$@\" $orig_args"

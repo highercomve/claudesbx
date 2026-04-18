@@ -1,43 +1,39 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SRC="$SCRIPT_DIR/claudesbx"
 DEST="${1:-$HOME/.local/bin/claudesbx}"
-VOLUME="${CLAUDESBX_VOLUME:-claudesbx-home}"
 IMAGE="${CLAUDESBX_IMAGE:-claudesbx}"
 SANDBOX_DIR="$HOME/.claudesbx"
 
 purge=0
 for arg in "$@"; do
-    [[ "$arg" == "--purge" ]] && purge=1
+    [ "$arg" = "--purge" ] && purge=1
 done
 
-if [[ -L "$DEST" ]]; then
-    link_target="$(readlink "$DEST")"
-    if [[ "$link_target" == "$SRC" ]]; then
+if [ -L "$DEST" ]; then
+    link_target=$(readlink "$DEST")
+    if [ "$link_target" = "$SRC" ]; then
         rm -f "$DEST"
         echo "removed: $DEST"
     else
         echo "skip: $DEST points to $link_target (not $SRC)" >&2
     fi
-elif [[ -e "$DEST" ]]; then
+elif [ -e "$DEST" ]; then
     echo "skip: $DEST exists but is not a symlink" >&2
 else
     echo "skip: $DEST does not exist" >&2
 fi
 
-if (( purge )); then
+if [ "$purge" -eq 1 ]; then
     if docker image inspect "$IMAGE" >/dev/null 2>&1; then
         docker image rm "$IMAGE" >/dev/null && echo "removed image: $IMAGE"
     fi
-    if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
-        docker volume rm "$VOLUME" >/dev/null && echo "removed volume: $VOLUME"
-    fi
-    if [[ -d "$SANDBOX_DIR" ]]; then
+    if [ -d "$SANDBOX_DIR" ]; then
         rm -rf "$SANDBOX_DIR"
         echo "removed: $SANDBOX_DIR"
     fi
 else
-    echo "note: docker image/volume and $SANDBOX_DIR kept (use --purge to remove)" >&2
+    echo "note: docker image and $SANDBOX_DIR kept (use --purge to remove)" >&2
 fi

@@ -1,0 +1,35 @@
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Local Claude Code state (user-specific; should not be committed)
+.claude/settings.local.json
+.claude/.credentials.json
+.claude/projects/
+.claude/todos/
+.claude/shell-snapshots/
+.claude/statsig/
+.claude/ide/
+
+# Build / runtime artifacts
+*.log
+*.tmp
+tmp/
+dist/
+build/

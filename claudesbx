@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VOLUME="${CLAUDESBX_VOLUME:-claudesbx-home}"
+IMAGE="${CLAUDESBX_IMAGE:-claudesbx}"
+HOST_CLAUDE="$HOME/.claude"
+SANDBOX_DIR="$HOME/.claudesbx"
+SANDBOX_JSON="$SANDBOX_DIR/.claude.json"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+DOCKERFILE="$SCRIPT_DIR/Dockerfile"
+
+needs_build=0
+if ! image_ts=$(docker image inspect -f '{{.Created}}' "$IMAGE" 2>/dev/null); then
+    needs_build=1
+elif [[ -f "$DOCKERFILE" ]]; then
+    image_epoch=$(date -d "$image_ts" +%s 2>/dev/null || echo 0)
+    dockerfile_epoch=$(stat -c %Y "$DOCKERFILE")
+    (( dockerfile_epoch > image_epoch )) && needs_build=1
+fi
+
+if (( needs_build )); then
+    echo "claudesbx: building $IMAGE..." >&2
+    docker build -t "$IMAGE" "$SCRIPT_DIR"
+fi
+
+docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
+
+mkdir -p "$SANDBOX_DIR"
+[[ -f "$SANDBOX_JSON" ]] || echo '{}' > "$SANDBOX_JSON"
+
+shared=()
+for sub in agents skills plugins CLAUDE.md projects; do
+    if [[ -e "$HOST_CLAUDE/$sub" ]]; then
+        shared+=(-v "$HOST_CLAUDE/$sub:/root/.claude/$sub")
+    fi
+done
+
+serena=()
+if [[ -d "$HOME/.serena" ]]; then
+    serena+=(-v "$HOME/.serena:/root/.serena")
+fi
+
+bootstrap='
+sentinel=/root/.claudesbx-bootstrapped
+if [[ ! -f $sentinel ]]; then
+  mcps=$(claude mcp list 2>/dev/null || true)
+  grep -q "^serena" <<<"$mcps" || \
+    claude mcp add --scope user serena -- uvx --from git+https://github.com/oraios/serena serena start-mcp-server --context=claude-code --project-from-cwd >/dev/null
+  grep -q "^playwright" <<<"$mcps" || \
+    claude mcp add --scope user playwright -- npx @playwright/mcp@latest >/dev/null
+  touch "$sentinel"
+fi
+exec claude "$@"
+'
+
+dind=()
+if [[ -S /var/run/docker.sock ]]; then
+    dind+=(-v /var/run/docker.sock:/var/run/docker.sock)
+fi
+
+docker run --rm -it \
+    -v "$VOLUME:/root" \
+    -v "$SANDBOX_JSON:/root/.claude.json" \
+    "${shared[@]}" \
+    "${serena[@]}" \
+    "${dind[@]}" \
+    -v "$PWD:$PWD" \
+    -w "$PWD" \
+    --entrypoint bash \
+    "$IMAGE" \
+    -c "$bootstrap" bash "$@"

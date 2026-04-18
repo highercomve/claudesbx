@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$SCRIPT_DIR/claudesbx"
+DEST="${1:-$HOME/.local/bin/claudesbx}"
+
+[[ -x "$SRC" ]] || { echo "missing executable: $SRC" >&2; exit 1; }
+
+mkdir -p "$(dirname "$DEST")"
+ln -sfn "$SRC" "$DEST"
+echo "linked: $DEST -> $SRC"
+
+case ":$PATH:" in
+    *":$(dirname "$DEST"):"*) ;;
+    *) echo "note: $(dirname "$DEST") is not in PATH" >&2 ;;
+esac
